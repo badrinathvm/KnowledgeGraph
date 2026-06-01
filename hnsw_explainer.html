@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HNSW & Similarity Search — Visual Guide</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --accent: #7c6af7;
+    --accent2: #4fc3f7;
+    --green: #56d364;
+    --red: #f85149;
+    --yellow: #e3b341;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --border: #30363d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.6;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+  h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin: 48px 0 16px; color: var(--accent2); }
+  h3 { font-size: 1.1rem; font-weight: 600; margin: 24px 0 10px; color: var(--yellow); }
+  p { margin-bottom: 12px; color: #c9d1d9; }
+  .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 40px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .card-accent { border-left: 3px solid var(--accent); }
+  .card-green  { border-left: 3px solid var(--green); }
+  .card-yellow { border-left: 3px solid var(--yellow); }
+  .card-red    { border-left: 3px solid var(--red); }
+
+  /* ── Pipeline Flow ── */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+    margin: 20px 0;
+  }
+  .pipe-step {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 18px;
+    text-align: center;
+    font-size: 0.85rem;
+  }
+  .pipe-step .label { font-weight: 600; color: var(--accent2); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .pipe-step .val   { color: var(--text); margin-top: 4px; }
+  .pipe-arrow {
+    color: var(--muted);
+    font-size: 1.4rem;
+    padding: 0 8px;
+  }
+  .dim-badge {
+    display: inline-block;
+    background: #7c6af722;
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 0.78rem;
+    color: var(--accent);
+    margin-left: 6px;
+  }
+
+  /* ── HNSW Diagram ── */
+  #hnsw-svg { width: 100%; height: auto; display: block; }
+  .layer-label { font-family: monospace; font-size: 13px; fill: var(--muted); }
+  .node-default { fill: var(--surface2); stroke: var(--border); stroke-width: 1.5; }
+  .node-entry   { fill: #7c6af744; stroke: var(--accent); stroke-width: 2; }
+  .node-visited { fill: #4fc3f722; stroke: var(--accent2); stroke-width: 2; }
+  .node-result  { fill: #56d36422; stroke: var(--green); stroke-width: 2; }
+  .node-query   { fill: #e3b34122; stroke: var(--yellow); stroke-width: 2.5; }
+  .node-far     { fill: #f8514922; stroke: var(--red); stroke-width: 1.5; }
+  .edge-default { stroke: var(--border); stroke-width: 1; }
+  .edge-path    { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; }
+  .edge-highlight { stroke: var(--accent2); stroke-width: 2; }
+  .node-label   { font-family: monospace; font-size: 11px; fill: var(--text); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+
+  /* ── Step Animation ── */
+  .steps-nav {
+    display: flex;
+    gap: 8px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+  }
+  .step-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .step-btn:hover { border-color: var(--accent); color: var(--text); }
+  .step-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .step-desc {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 0.9rem;
+    min-height: 56px;
+    color: var(--text);
+    margin-bottom: 16px;
+    transition: all 0.3s;
+  }
+  .step-desc strong { color: var(--accent2); }
+
+  /* ── EF Slider ── */
+  .ef-demo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  @media (max-width: 600px) { .ef-demo { grid-template-columns: 1fr; } }
+  .ef-panel { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .ef-panel h4 { font-size: 0.9rem; margin-bottom: 10px; }
+  .ef-bar-wrap { margin-top: 8px; }
+  .ef-bar { height: 8px; border-radius: 4px; margin-bottom: 6px; transition: width 0.5s; }
+  .ef-bar-label { font-size: 0.78rem; color: var(--muted); display: flex; justify-content: space-between; }
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+    margin: 12px 0;
+  }
+  .ef-stat { display: flex; gap: 24px; margin-top: 10px; }
+  .ef-stat div { text-align: center; }
+  .ef-stat .num { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+  .ef-stat .lbl { font-size: 0.75rem; color: var(--muted); }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th {
+    background: var(--surface2);
+    color: var(--accent2);
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 2px solid var(--border);
+    font-weight: 600;
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: #c9d1d9; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #ffffff08; }
+  .tag {
+    display: inline-block;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .tag-fast   { background: #56d36422; color: var(--green); }
+  .tag-approx { background: #e3b34122; color: var(--yellow); }
+  .tag-exact  { background: #f8514922; color: var(--red); }
+
+  /* ── Cosine Visual ── */
+  #cosine-svg { width: 100%; max-width: 420px; display: block; margin: 16px auto; }
+
+  /* ── Legend ── */
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+  .legend-dot  { width: 12px; height: 12px; border-radius: 50%; border: 2px solid; }
+
+  /* ── Beam search ── */
+  #beam-svg { width: 100%; height: auto; display: block; margin-top: 12px; }
+
+  /* ── Comparison bar chart ── */
+  .compare-bars { display: flex; gap: 20px; align-items: flex-end; margin: 16px 0; }
+  .bar-col { flex: 1; text-align: center; }
+  .bar-rect {
+    border-radius: 6px 6px 0 0;
+    transition: height 0.6s;
+    margin: 0 auto;
+    width: 60%;
+  }
+  .bar-val { font-size: 1.1rem; font-weight: 700; margin-top: 6px; }
+  .bar-lbl { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+
+  code {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.85em;
+    color: var(--accent2);
+  }
+  pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-family: 'Consolas', monospace;
+    font-size: 0.85rem;
+    margin: 12px 0;
+    line-height: 1.7;
+  }
+  .hl-keyword { color: var(--accent); }
+  .hl-string  { color: var(--green); }
+  .hl-comment { color: var(--muted); font-style: italic; }
+  .hl-func    { color: var(--accent2); }
+  .hl-num     { color: var(--yellow); }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>How Similarity Search Works</h1>
+  <p class="subtitle">A visual walkthrough of vector search & HNSW — from your KnowledgeGraph project</p>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 1: THE PIPELINE                        -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>1 · The Full Pipeline</h2>
+  <p>Every time you call <code>similarity_search(query, k=6)</code> in <code>nodes/nodes.py</code>, here's what happens end-to-end:</p>
+
+  <div class="card card-accent">
+    <div class="pipeline">
+      <div class="pipe-step">
+        <div class="label">Your Query</div>
+        <div class="val">"movies about space"</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="label">OpenAI Embedding</div>
+        <div class="val">text-embedding-ada-002<span class="dim-badge">1536-dim</span></div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="label">HNSW Index Lookup</div>
+        <div class="val">Neo4j moviePlots index</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="label">Cosine Similarity</div>
+        <div class="val">Score each candidate</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="label">Top-K Results</div>
+        <div class="val">k = 6 plots returned</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cosine similarity visual -->
+  <h3>What is Cosine Similarity?</h3>
+  <p>Each text is encoded as a high-dimensional vector. Cosine similarity measures the <em>angle</em> between two vectors — not their length. Score of 1.0 means identical direction (same meaning); 0.0 means perpendicular (unrelated).</p>
+
+  <div class="card">
+    <svg id="cosine-svg" viewBox="0 0 420 220">
+      <!-- Axes -->
+      <line x1="40" y1="180" x2="380" y2="180" stroke="#30363d" stroke-width="1"/>
+      <line x1="40" y1="180" x2="40"  y2="20"  stroke="#30363d" stroke-width="1"/>
+      <text x="390" y="184" fill="#8b949e" font-size="11" font-family="monospace">dim₁</text>
+      <text x="34"  y="14"  fill="#8b949e" font-size="11" font-family="monospace">dim₂</text>
+      <!-- Origin -->
+      <circle cx="40" cy="180" r="3" fill="#8b949e"/>
+      <!-- Query vector -->
+      <line x1="40" y1="180" x2="220" y2="50" stroke="#e3b341" stroke-width="2.5" marker-end="url(#arrow-q)"/>
+      <text x="228" y="46" fill="#e3b341" font-size="12" font-family="monospace" font-weight="bold">Query</text>
+      <!-- Similar vector -->
+      <line x1="40" y1="180" x2="250" y2="70" stroke="#56d364" stroke-width="2.5" marker-end="url(#arrow-s)"/>
+      <text x="258" y="66" fill="#56d364" font-size="12" font-family="monospace">Plot A (sim=0.97)</text>
+      <!-- Dissimilar vector -->
+      <line x1="40" y1="180" x2="340" y2="155" stroke="#f85149" stroke-width="2.5" marker-end="url(#arrow-d)"/>
+      <text x="348" y="151" fill="#f85149" font-size="12" font-family="monospace">Plot Z (sim=0.12)</text>
+      <!-- Angle arc for similar -->
+      <path d="M 80,168 A 45,45 0 0,1 65,145" fill="none" stroke="#56d364" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <text x="90" y="152" fill="#56d364" font-size="10" font-family="monospace">small angle</text>
+      <!-- Angle arc for dissimilar -->
+      <path d="M 85,179 A 45,45 0 0,1 110,162" fill="none" stroke="#f85149" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <text x="120" y="158" fill="#f85149" font-size="10" font-family="monospace">large angle</text>
+
+      <defs>
+        <marker id="arrow-q" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#e3b341"/>
+        </marker>
+        <marker id="arrow-s" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#56d364"/>
+        </marker>
+        <marker id="arrow-d" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#f85149"/>
+        </marker>
+      </defs>
+    </svg>
+    <p style="text-align:center; color: var(--muted); font-size:0.8rem;">Small angle = high similarity · Large angle = low similarity</p>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 2: DOES IT SCAN EVERYTHING?            -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>2 · Does It Scan the Entire DB?</h2>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+    <div class="card card-red">
+      <h3 style="color:var(--red); margin-top:0">Brute Force (not what Neo4j uses)</h3>
+      <p>Compare query against every single vector. Perfectly accurate. Extremely slow for large datasets.</p>
+      <div class="compare-bars" style="margin-top:16px;">
+        <div class="bar-col">
+          <div class="bar-rect" style="background:var(--red); height:120px;"></div>
+          <div class="bar-val" style="color:var(--red);">O(N)</div>
+          <div class="bar-lbl">Time</div>
+        </div>
+        <div class="bar-col">
+          <div class="bar-rect" style="background:#4fc3f7; height:120px;"></div>
+          <div class="bar-val" style="color:var(--accent2);">100%</div>
+          <div class="bar-lbl">Recall</div>
+        </div>
+      </div>
+    </div>
+    <div class="card card-green">
+      <h3 style="color:var(--green); margin-top:0">HNSW (what Neo4j uses)</h3>
+      <p>Navigate a multi-layer graph to reach the approximate neighborhood. Fast. ~95-99% recall in practice.</p>
+      <div class="compare-bars" style="margin-top:16px;">
+        <div class="bar-col">
+          <div class="bar-rect" style="background:var(--green); height:28px;"></div>
+          <div class="bar-val" style="color:var(--green);">O(log N)</div>
+          <div class="bar-lbl">Time</div>
+        </div>
+        <div class="bar-col">
+          <div class="bar-rect" style="background:#4fc3f7; height:114px;"></div>
+          <div class="bar-val" style="color:var(--accent2);">~97%</div>
+          <div class="bar-lbl">Recall</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p><strong>RAM usage:</strong> Neo4j keeps the HNSW index in memory (it's a graph of pointers), but NOT the raw vectors or document content. Only the vectors of nodes visited during traversal are accessed.</p>
+
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 3: HNSW STRUCTURE                      -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>3 · HNSW Structure — The Multi-Layer Graph</h2>
+  <p>Think of it as a <strong>multi-floor building</strong>. Higher floors are sparser and act as express highways. Every node lives on Layer 0; only some nodes are promoted to upper layers.</p>
+
+  <div class="card">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#7c6af744; border-color:var(--accent);"></div> Entry / promoted node</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e3b34122; border-color:var(--yellow);"></div> Query vector</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#4fc3f722; border-color:var(--accent2);"></div> Visited during search</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#56d36422; border-color:var(--green);"></div> Result (top-k)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f8514922; border-color:var(--red);"></div> Never visited (far)</div>
+    </div>
+
+    <svg id="hnsw-svg" viewBox="0 0 860 420">
+      <!-- Layer backgrounds -->
+      <rect x="10" y="10"  width="840" height="110" rx="8" fill="#ffffff04" stroke="#30363d" stroke-width="1"/>
+      <rect x="10" y="140" width="840" height="110" rx="8" fill="#ffffff04" stroke="#30363d" stroke-width="1"/>
+      <rect x="10" y="270" width="840" height="130" rx="8" fill="#ffffff06" stroke="#30363d" stroke-width="1"/>
+
+      <!-- Layer labels -->
+      <text x="22" y="32"  class="layer-label">Layer 2  (sparse — express highway)</text>
+      <text x="22" y="162" class="layer-label">Layer 1  (medium density)</text>
+      <text x="22" y="292" class="layer-label">Layer 0  (all nodes — dense)</text>
+
+      <!-- ── Layer 2 edges ── -->
+      <line x1="150" y1="80" x2="430" y2="80" class="edge-default"/>
+      <line x1="430" y1="80" x2="680" y2="80" class="edge-default"/>
+      <!-- Layer 2 nodes: A, E, H -->
+      <circle cx="150" cy="80" r="20" class="node-entry"/>
+      <text x="150" y="80" class="node-label">A</text>
+      <circle cx="430" cy="80" r="20" class="node-entry"/>
+      <text x="430" y="80" class="node-label">E</text>
+      <circle cx="680" cy="80" r="20" class="node-entry"/>
+      <text x="680" y="80" class="node-label">H</text>
+
+      <!-- ── Layer 1 edges ── -->
+      <line x1="150" y1="210" x2="260" y2="210" class="edge-default"/>
+      <line x1="260" y1="210" x2="430" y2="210" class="edge-default"/>
+      <line x1="430" y1="210" x2="560" y2="210" class="edge-default"/>
+      <line x1="560" y1="210" x2="680" y2="210" class="edge-default"/>
+      <!-- Layer 1 nodes: A, C, E, G, H -->
+      <circle cx="150" cy="210" r="20" class="node-entry"/>
+      <text x="150" y="210" class="node-label">A</text>
+      <circle cx="260" cy="210" r="18" class="node-default"/>
+      <text x="260" y="210" class="node-label">C</text>
+      <circle cx="430" cy="210" r="20" class="node-entry"/>
+      <text x="430" y="210" class="node-label">E</text>
+      <circle cx="560" cy="210" r="18" class="node-default"/>
+      <text x="560" y="210" class="node-label">G</text>
+      <circle cx="680" cy="210" r="20" class="node-entry"/>
+      <text x="680" y="210" class="node-label">H</text>
+
+      <!-- ── Layer 0 edges (dense) ── -->
+      <line x1="80"  y1="350" x2="150" y2="350" class="edge-default"/>
+      <line x1="150" y1="350" x2="220" y2="350" class="edge-default"/>
+      <line x1="220" y1="350" x2="260" y2="350" class="edge-default"/>
+      <line x1="260" y1="350" x2="340" y2="350" class="edge-default"/>
+      <line x1="340" y1="350" x2="430" y2="350" class="edge-default"/>
+      <line x1="430" y1="350" x2="500" y2="350" class="edge-default"/>
+      <line x1="500" y1="350" x2="560" y2="350" class="edge-default"/>
+      <line x1="560" y1="350" x2="620" y2="350" class="edge-default"/>
+      <line x1="620" y1="350" x2="680" y2="350" class="edge-default"/>
+      <line x1="680" y1="350" x2="780" y2="350" class="edge-default"/>
+      <!-- Cross edges -->
+      <line x1="150" y1="350" x2="340" y2="350" class="edge-default" stroke-dasharray="3 3"/>
+      <line x1="430" y1="350" x2="620" y2="350" class="edge-default" stroke-dasharray="3 3"/>
+
+      <!-- Layer 0 nodes -->
+      <circle cx="80"  cy="350" r="16" class="node-far"/>
+      <text x="80"  cy="350" class="node-label" y="350">Z</text>
+      <circle cx="150" cy="350" r="18" class="node-entry"/>
+      <text x="150" y="350" class="node-label">A</text>
+      <circle cx="220" cy="350" r="16" class="node-default"/>
+      <text x="220" y="350" class="node-label">B</text>
+      <circle cx="260" cy="350" r="16" class="node-default"/>
+      <text x="260" y="350" class="node-label">C</text>
+      <circle cx="340" cy="350" r="16" class="node-default"/>
+      <text x="340" y="350" class="node-label">D</text>
+      <circle cx="430" cy="350" r="18" class="node-entry"/>
+      <text x="430" y="350" class="node-label">E</text>
+      <circle cx="500" cy="350" r="16" class="node-result"/>
+      <text x="500" y="350" class="node-label">F</text>
+      <circle cx="560" cy="350" r="16" class="node-visited"/>
+      <text x="560" y="350" class="node-label">G</text>
+      <circle cx="620" cy="350" r="16" class="node-result"/>
+      <text x="620" y="350" class="node-label">H★</text>
+      <circle cx="680" cy="350" r="18" class="node-entry"/>
+      <text x="680" y="350" class="node-label">I</text>
+      <circle cx="780" cy="350" r="16" class="node-far"/>
+      <text x="780" y="350" class="node-label">Y</text>
+
+      <!-- Query node (hovering) -->
+      <circle cx="580" cy="340" r="18" class="node-query"/>
+      <text x="580" y="340" class="node-label" fill="#e3b341">Q</text>
+      <text x="580" y="322" fill="#e3b341" font-size="10" font-family="monospace" text-anchor="middle">query</text>
+
+      <!-- Vertical connections (same node across layers) -->
+      <line x1="150" y1="100" x2="150" y2="190" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="430" y1="100" x2="430" y2="190" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="680" y1="100" x2="680" y2="190" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="150" y1="230" x2="150" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="260" y1="230" x2="260" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="430" y1="230" x2="430" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="560" y1="230" x2="560" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="680" y1="230" x2="680" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+
+      <!-- "Never visited" labels -->
+      <text x="80"  y="376" fill="#f85149" font-size="9" font-family="monospace" text-anchor="middle">never visited</text>
+      <text x="780" y="376" fill="#f85149" font-size="9" font-family="monospace" text-anchor="middle">never visited</text>
+    </svg>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 4: STEP-BY-STEP SEARCH ANIMATION      -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>4 · Step-by-Step: How the Search Walks</h2>
+  <p>Click through each step to see how HNSW navigates to find your top results.</p>
+
+  <div class="card card-accent">
+    <div class="steps-nav" id="stepsNav">
+      <button class="step-btn active" onclick="setStep(0)">Step 1</button>
+      <button class="step-btn" onclick="setStep(1)">Step 2</button>
+      <button class="step-btn" onclick="setStep(2)">Step 3</button>
+      <button class="step-btn" onclick="setStep(3)">Step 4</button>
+      <button class="step-btn" onclick="setStep(4)">Step 5</button>
+    </div>
+    <div class="step-desc" id="stepDesc"></div>
+
+    <svg id="walk-svg" viewBox="0 0 860 380" style="width:100%;height:auto;">
+      <!-- Same 3-layer structure, simplified for the walk -->
+      <rect x="10" y="10"  width="840" height="100" rx="8" fill="#ffffff03" stroke="#30363d"/>
+      <rect x="10" y="130" width="840" height="100" rx="8" fill="#ffffff03" stroke="#30363d"/>
+      <rect x="10" y="250" width="840" height="110" rx="8" fill="#ffffff05" stroke="#30363d"/>
+      <text x="22" y="30"  class="layer-label">Layer 2</text>
+      <text x="22" y="150" class="layer-label">Layer 1</text>
+      <text x="22" y="270" class="layer-label">Layer 0</text>
+
+      <!-- L2 edges -->
+      <line x1="150" y1="70" x2="430" y2="70" class="edge-default"/>
+      <line x1="430" y1="70" x2="680" y2="70" class="edge-default"/>
+      <!-- L1 edges -->
+      <line x1="150" y1="195" x2="260" y2="195" class="edge-default"/>
+      <line x1="260" y1="195" x2="430" y2="195" class="edge-default"/>
+      <line x1="430" y1="195" x2="560" y2="195" class="edge-default"/>
+      <line x1="560" y1="195" x2="680" y2="195" class="edge-default"/>
+      <!-- L0 edges -->
+      <line x1="150" y1="320" x2="260" y2="320" class="edge-default"/>
+      <line x1="260" y1="320" x2="340" y2="320" class="edge-default"/>
+      <line x1="340" y1="320" x2="430" y2="320" class="edge-default"/>
+      <line x1="430" y1="320" x2="500" y2="320" class="edge-default"/>
+      <line x1="500" y1="320" x2="560" y2="320" class="edge-default"/>
+      <line x1="560" y1="320" x2="620" y2="320" class="edge-default"/>
+      <line x1="620" y1="320" x2="680" y2="320" class="edge-default"/>
+
+      <!-- Static nodes L2 -->
+      <circle cx="150" cy="70" r="18" class="node-entry" id="w-l2-a"/><text x="150" y="70" class="node-label">A</text>
+      <circle cx="430" cy="70" r="18" class="node-default" id="w-l2-e"/><text x="430" y="70" class="node-label">E</text>
+      <circle cx="680" cy="70" r="18" class="node-default" id="w-l2-h"/><text x="680" y="70" class="node-label">H</text>
+      <!-- Static nodes L1 -->
+      <circle cx="150" cy="195" r="16" class="node-default" id="w-l1-a"/><text x="150" y="195" class="node-label">A</text>
+      <circle cx="260" cy="195" r="16" class="node-default" id="w-l1-c"/><text x="260" y="195" class="node-label">C</text>
+      <circle cx="430" cy="195" r="16" class="node-default" id="w-l1-e"/><text x="430" y="195" class="node-label">E</text>
+      <circle cx="560" cy="195" r="16" class="node-default" id="w-l1-g"/><text x="560" y="195" class="node-label">G</text>
+      <circle cx="680" cy="195" r="16" class="node-default" id="w-l1-h"/><text x="680" y="195" class="node-label">H</text>
+      <!-- Static nodes L0 -->
+      <circle cx="150" cy="320" r="15" class="node-default" id="w-l0-a"/><text x="150" y="320" class="node-label">A</text>
+      <circle cx="260" cy="320" r="15" class="node-default" id="w-l0-c"/><text x="260" y="320" class="node-label">C</text>
+      <circle cx="340" cy="320" r="15" class="node-default" id="w-l0-d"/><text x="340" y="320" class="node-label">D</text>
+      <circle cx="430" cy="320" r="15" class="node-default" id="w-l0-e"/><text x="430" y="320" class="node-label">E</text>
+      <circle cx="500" cy="320" r="15" class="node-default" id="w-l0-f"/><text x="500" y="320" class="node-label">F</text>
+      <circle cx="560" cy="320" r="15" class="node-default" id="w-l0-g"/><text x="560" y="320" class="node-label">G</text>
+      <circle cx="620" cy="320" r="15" class="node-default" id="w-l0-h"/><text x="620" y="320" class="node-label">H</text>
+      <circle cx="680" cy="320" r="15" class="node-default" id="w-l0-i"/><text x="680" y="320" class="node-label">I</text>
+
+      <!-- Query node -->
+      <circle cx="590" cy="312" r="16" class="node-query" id="w-query"/>
+      <text x="590" y="312" class="node-label" fill="#e3b341">Q</text>
+
+      <!-- Traversal path arrows (hidden by default, shown per step) -->
+      <defs>
+        <marker id="tarrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#7c6af7"/>
+        </marker>
+        <marker id="tarrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#4fc3f7"/>
+        </marker>
+      </defs>
+      <!-- Step arrows, controlled by JS -->
+      <g id="walk-arrows"></g>
+    </svg>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 5: THE ef PARAMETER                    -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>5 · The <code>ef</code> Parameter — Accuracy Knob</h2>
+  <p>On Layer 0, HNSW does a <strong>beam search</strong>. The <code>efQuery</code> (exploration factor) controls how many candidate nodes are kept in the queue. Higher <code>ef</code> = more candidates checked = higher recall, lower speed.</p>
+
+  <div class="card card-yellow">
+    <label style="color:var(--text); font-weight:600;">
+      Drag to adjust <code>efQuery</code>: <span id="ef-val" style="color:var(--yellow);">100</span>
+    </label>
+    <input type="range" min="10" max="500" value="100" id="ef-slider" oninput="updateEf(this.value)">
+
+    <div class="ef-stat" id="ef-stats">
+      <div><div class="num" id="ef-candidates">100</div><div class="lbl">Candidates checked</div></div>
+      <div><div class="num" id="ef-recall" style="color:var(--green);">87%</div><div class="lbl">Approx recall</div></div>
+      <div><div class="num" id="ef-latency" style="color:var(--accent2);">4ms</div><div class="lbl">Approx latency</div></div>
+    </div>
+
+    <div class="ef-bar-wrap" style="margin-top:16px;">
+      <div class="ef-bar-label"><span>Candidate coverage</span><span id="ef-pct">20%</span></div>
+      <div class="ef-bar" style="background:var(--accent);" id="ef-bar-cov"></div>
+      <div class="ef-bar-label"><span>Recall quality</span><span id="ef-recall2">87%</span></div>
+      <div class="ef-bar" style="background:var(--green);" id="ef-bar-rec"></div>
+      <div class="ef-bar-label"><span>Latency cost</span><span id="ef-lat2">4ms</span></div>
+      <div class="ef-bar" style="background:var(--red);" id="ef-bar-lat"></div>
+    </div>
+    <p style="font-size:0.82rem; color:var(--muted); margin-top:12px;">
+      Neo4j exposes this as <code>efQuery</code> in the vector index config. Default is typically 100. If <code>ef &lt; k</code>, HNSW automatically raises it to k.
+    </p>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 6: WHY FAR NODES ARE NEVER VISITED     -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>6 · Why Distant Nodes Are Never Visited</h2>
+  <p>The greedy walk <em>always moves toward the query vector</em>. It can never "accidentally" wander to a far region of the vector space — each hop is strictly closer.</p>
+
+  <div class="card">
+    <svg viewBox="0 0 600 260" style="width:100%;max-width:600px;display:block;margin:0 auto;">
+      <!-- Vector space scatter -->
+      <text x="300" y="20" fill="#8b949e" font-size="11" font-family="monospace" text-anchor="middle">2D projection of vector space</text>
+      <!-- Far cluster -->
+      <circle cx="80"  cy="200" r="8" fill="#f8514922" stroke="#f85149" stroke-width="1.5"/>
+      <circle cx="60"  cy="180" r="8" fill="#f8514922" stroke="#f85149" stroke-width="1.5"/>
+      <circle cx="100" cy="170" r="8" fill="#f8514922" stroke="#f85149" stroke-width="1.5"/>
+      <circle cx="70"  cy="220" r="8" fill="#f8514922" stroke="#f85149" stroke-width="1.5"/>
+      <text x="80" y="244" fill="#f85149" font-size="10" font-family="monospace" text-anchor="middle">far cluster (never reached)</text>
+
+      <!-- Mid nodes -->
+      <circle cx="240" cy="160" r="8" fill="#ffffff11" stroke="#30363d" stroke-width="1.5"/>
+      <circle cx="270" cy="190" r="8" fill="#ffffff11" stroke="#30363d" stroke-width="1.5"/>
+      <circle cx="300" cy="175" r="8" fill="#ffffff11" stroke="#30363d" stroke-width="1.5"/>
+
+      <!-- Near cluster -->
+      <circle cx="420" cy="100" r="10" fill="#4fc3f722" stroke="#4fc3f7" stroke-width="2"/>
+      <circle cx="460" cy="120" r="10" fill="#4fc3f722" stroke="#4fc3f7" stroke-width="2"/>
+      <circle cx="440" cy="80"  r="10" fill="#56d36422" stroke="#56d364" stroke-width="2"/>
+      <circle cx="480" cy="90"  r="10" fill="#56d36422" stroke="#56d364" stroke-width="2"/>
+      <circle cx="400" cy="130" r="10" fill="#4fc3f722" stroke="#4fc3f7" stroke-width="2"/>
+      <text x="445" y="156" fill="#56d364" font-size="10" font-family="monospace" text-anchor="middle">top-k results ✓</text>
+
+      <!-- Query -->
+      <circle cx="500" cy="70" r="14" fill="#e3b34122" stroke="#e3b341" stroke-width="2.5"/>
+      <text x="500" y="70" font-size="10" font-family="monospace" fill="#e3b341" text-anchor="middle" dominant-baseline="central">Q</text>
+      <text x="500" y="50" fill="#e3b341" font-size="10" font-family="monospace" text-anchor="middle">Query</text>
+
+      <!-- Entry point (layer 2 start) -->
+      <circle cx="150" cy="140" r="10" fill="#7c6af744" stroke="#7c6af7" stroke-width="2"/>
+      <text x="150" y="125" fill="#7c6af7" font-size="10" font-family="monospace" text-anchor="middle">entry</text>
+
+      <!-- Traversal path -->
+      <path d="M150,140 L240,160 L300,175 L420,100 L460,120 L480,90"
+            fill="none" stroke="#7c6af7" stroke-width="2" stroke-dasharray="6 3" marker-end="url(#path-arrow)"/>
+      <defs>
+        <marker id="path-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#7c6af7"/>
+        </marker>
+      </defs>
+      <text x="310" y="110" fill="#7c6af7" font-size="10" font-family="monospace">greedy path →</text>
+    </svg>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 7: YOUR CODE IN CONTEXT               -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>7 · Your Code in Context</h2>
+  <pre><span class="hl-comment"># nodes/nodes.py</span>
+<span class="hl-keyword">def</span> <span class="hl-func">retrieve</span>(state: MovieState) -> dict:
+    <span class="hl-comment"># 1. state["query"]  →  OpenAI ada-002  →  1536-dim vector</span>
+    <span class="hl-comment"># 2. Neo4j HNSW index ("moviePlots") does approximate nearest-neighbor</span>
+    <span class="hl-comment"># 3. Returns top-6 Movie nodes by cosine similarity on plotEmbedding</span>
+    context = plot_vector.<span class="hl-func">similarity_search</span>(query=state[<span class="hl-string">"query"</span>], k=<span class="hl-num">6</span>)
+    <span class="hl-keyword">return</span> {<span class="hl-string">"context"</span>: context}
+
+<span class="hl-comment"># database/neo4j_database.py — how the index is wired</span>
+embedding_model = <span class="hl-func">OpenAIEmbeddings</span>(model=<span class="hl-string">"text-embedding-ada-002"</span>)   <span class="hl-comment"># 1536-dim</span>
+<span class="hl-keyword">return</span> Neo4jVector.<span class="hl-func">from_existing_index</span>(
+    embedding=embedding_model,
+    graph=graph,
+    index_name=<span class="hl-string">"moviePlots"</span>,          <span class="hl-comment"># HNSW index in Neo4j</span>
+    embedding_node_property=<span class="hl-string">"plotEmbedding"</span>,
+    text_node_property=<span class="hl-string">"plot"</span>,
+)</pre>
+
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 8: SUMMARY TABLE                       -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>8 · Summary</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Step</th>
+          <th>What Happens</th>
+          <th>Complexity</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Query → Embedding</td>
+          <td>OpenAI API converts text to 1536-dim float vector</td>
+          <td>O(1) API call</td>
+          <td><span class="tag tag-fast">FAST</span></td>
+        </tr>
+        <tr>
+          <td>Layer 2 entry + greedy walk</td>
+          <td>Start at sparse layer, greedily move toward query vector</td>
+          <td>O(log N)</td>
+          <td><span class="tag tag-fast">FAST</span></td>
+        </tr>
+        <tr>
+          <td>Descend through layers</td>
+          <td>Repeat greedy walk on each layer, progressively closer to query</td>
+          <td>O(log N × layers)</td>
+          <td><span class="tag tag-fast">FAST</span></td>
+        </tr>
+        <tr>
+          <td>Layer 0 beam search</td>
+          <td>Explore <code>ef</code> candidates around current position</td>
+          <td>O(ef × log ef)</td>
+          <td><span class="tag tag-approx">APPROXIMATE</span></td>
+        </tr>
+        <tr>
+          <td>Return top-k by similarity</td>
+          <td>Sort <code>ef</code> candidates, return best 6</td>
+          <td>O(ef)</td>
+          <td><span class="tag tag-approx">APPROXIMATE</span></td>
+        </tr>
+        <tr>
+          <td>Brute force (not used)</td>
+          <td>Compare query against every vector in DB</td>
+          <td>O(N)</td>
+          <td><span class="tag tag-exact">EXACT</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 9: IMPROVEMENT OPTIONS                 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>9 · Ways to Improve Accuracy</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>Approach</th><th>What It Does</th><th>Effort</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>MMR</strong></td>
+          <td>Fetch 20, return 6 diverse results (no near-duplicates). 1-line change.</td>
+          <td><span class="tag tag-fast">LOW</span></td>
+        </tr>
+        <tr>
+          <td><strong>Cross-encoder reranking</strong></td>
+          <td>Retrieve 20, score each with a cross-encoder model, return top 6. Best accuracy.</td>
+          <td><span class="tag tag-approx">MED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Upgrade embedding model</strong></td>
+          <td>text-embedding-3-large: 3× better quality than ada-002. Requires re-embedding all plots.</td>
+          <td><span class="tag tag-approx">MED</span></td>
+        </tr>
+        <tr>
+          <td><strong>Hybrid search (BM25 + vector)</strong></td>
+          <td>Combine keyword exact-match with semantic search. Catches literal title queries.</td>
+          <td><span class="tag tag-exact">HIGH</span></td>
+        </tr>
+        <tr>
+          <td><strong>Increase efQuery</strong></td>
+          <td>Raise exploration factor in Neo4j index. Free recall improvement, small latency cost.</td>
+          <td><span class="tag tag-fast">LOW</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="color:var(--muted); font-size:0.8rem; margin-top:40px; text-align:center;">
+    Generated for KnowledgeGraph · Neo4jVector + text-embedding-ada-002 + LangGraph
+  </p>
+</div>
+
+<script>
+// ── Step-by-step walk ──
+const steps = [
+  {
+    desc: "<strong>Step 1 — Enter at Layer 2 (top).</strong> Search begins at a fixed entry point (node A) on the sparsest layer. This node was chosen at index build time.",
+    highlight: { l2: ['a'], l1: [], l0: [], path: [] }
+  },
+  {
+    desc: "<strong>Step 2 — Greedy walk on Layer 2.</strong> From A, check neighbors (E, H). H is closer to query Q than A, so we move to H. No neighbor is closer than H — local minimum found.",
+    highlight: { l2: ['a','e','h'], l1: [], l0: [], path: [['l2-a','l2-e'],['l2-e','l2-h']] }
+  },
+  {
+    desc: "<strong>Step 3 — Drop to Layer 1, start at H.</strong> Find node H on Layer 1. Repeat greedy walk. Neighbors G and E are checked — G is closest to Q, move there.",
+    highlight: { l2: ['h'], l1: ['h','g'], l0: [], path: [['l1-h','l1-g']] }
+  },
+  {
+    desc: "<strong>Step 4 — Drop to Layer 0, start at G.</strong> Now on the densest layer. Switch to <em>beam search</em>: maintain a candidate list of size ef=100. Explore neighbors F, H, E around G.",
+    highlight: { l2: [], l1: ['g'], l0: ['g','f','h','e'], path: [['l0-g','l0-f'],['l0-g','l0-h'],['l0-g','l0-e']] }
+  },
+  {
+    desc: "<strong>Step 5 — Return top-k.</strong> Beam search exhausts ef candidates. Results are sorted by cosine similarity to Q. Top-6 are returned (here: H, F, G highlighted). Nodes A, Z, Y were never visited.",
+    highlight: { l2: [], l1: [], l0: ['g','f','h'], path: [] }
+  }
+];
+
+const nodeClasses = {
+  default: 'node-default',
+  entry:   'node-entry',
+  visited: 'node-visited',
+  result:  'node-result',
+  query:   'node-query',
+  far:     'node-far'
+};
+
+const nodeMap = {
+  'l2-a': 'w-l2-a', 'l2-e': 'w-l2-e', 'l2-h': 'w-l2-h',
+  'l1-a': 'w-l1-a', 'l1-c': 'w-l1-c', 'l1-e': 'w-l1-e', 'l1-g': 'w-l1-g', 'l1-h': 'w-l1-h',
+  'l0-a': 'w-l0-a', 'l0-c': 'w-l0-c', 'l0-d': 'w-l0-d', 'l0-e': 'w-l0-e',
+  'l0-f': 'w-l0-f', 'l0-g': 'w-l0-g', 'l0-h': 'w-l0-h', 'l0-i': 'w-l0-i'
+};
+
+// Position map for path arrows
+const pos = {
+  'l2-a': [150,70], 'l2-e': [430,70], 'l2-h': [680,70],
+  'l1-a': [150,195], 'l1-c': [260,195], 'l1-e': [430,195], 'l1-g': [560,195], 'l1-h': [680,195],
+  'l0-a': [150,320], 'l0-c': [260,320], 'l0-d': [340,320], 'l0-e': [430,320],
+  'l0-f': [500,320], 'l0-g': [560,320], 'l0-h': [620,320], 'l0-i': [680,320]
+};
+
+function resetNodes() {
+  Object.values(nodeMap).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('class', 'node-default');
+  });
+  // Restore promoted nodes
+  ['w-l2-a','w-l1-a'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('class', 'node-entry');
+  });
+  document.getElementById('walk-arrows').innerHTML = '';
+}
+
+function setStep(idx) {
+  resetNodes();
+  const step = steps[idx];
+  document.getElementById('stepDesc').innerHTML = step.desc;
+
+  // Update button states
+  document.querySelectorAll('.step-btn').forEach((b,i) => {
+    b.classList.toggle('active', i === idx);
+  });
+
+  const h = step.highlight;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const arrowsG = document.getElementById('walk-arrows');
+
+  // Highlight visited nodes
+  [...h.l2.map(n=>'l2-'+n), ...h.l1.map(n=>'l1-'+n), ...h.l0.map(n=>'l0-'+n)].forEach(key => {
+    const el = document.getElementById(nodeMap[key]);
+    if (el) {
+      if (idx === 4 && (key==='l0-f'||key==='l0-h'||key==='l0-g')) {
+        el.setAttribute('class','node-result');
+      } else {
+        el.setAttribute('class','node-visited');
+      }
+    }
+  });
+
+  // Draw path arrows
+  step.path.forEach(([from, to]) => {
+    const fp = pos[from], tp = pos[to];
+    if (!fp || !tp) return;
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', fp[0]); line.setAttribute('y1', fp[1]);
+    line.setAttribute('x2', tp[0]); line.setAttribute('y2', tp[1]);
+    line.setAttribute('stroke', '#7c6af7');
+    line.setAttribute('stroke-width', '2.5');
+    line.setAttribute('stroke-dasharray', '5 3');
+    line.setAttribute('marker-end', 'url(#tarrow)');
+    arrowsG.appendChild(line);
+  });
+}
+
+// ── EF Slider ──
+function updateEf(v) {
+  v = parseInt(v);
+  document.getElementById('ef-val').textContent = v;
+  document.getElementById('ef-candidates').textContent = v;
+
+  // Approximate recall curve: plateaus near 100%
+  const recall = Math.min(99, Math.round(75 + 24 * (1 - Math.exp(-v/120))));
+  const latency = Math.round(1 + v * 0.06);
+  const covPct  = Math.min(100, Math.round(v / 5));
+  const recPct  = recall;
+  const latPct  = Math.min(100, Math.round(latency / 30 * 100));
+
+  document.getElementById('ef-recall').textContent  = recall + '%';
+  document.getElementById('ef-latency').textContent = latency + 'ms';
+  document.getElementById('ef-recall2').textContent = recall + '%';
+  document.getElementById('ef-lat2').textContent    = latency + 'ms';
+  document.getElementById('ef-pct').textContent     = covPct + '%';
+
+  document.getElementById('ef-bar-cov').style.width = covPct + '%';
+  document.getElementById('ef-bar-cov').style.background = '#7c6af7';
+  document.getElementById('ef-bar-rec').style.width = recPct + '%';
+  document.getElementById('ef-bar-lat').style.width = latPct + '%';
+}
+
+// Init
+setStep(0);
+updateEf(100);
+</script>
+</body>
+</html>
