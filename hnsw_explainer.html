@@ -314,15 +314,24 @@
   <!-- ═══════════════════════════════════════════════ -->
   <h2>2 · Does It Scan the Entire DB?</h2>
 
+  <div class="card" style="background:#7c6af711; border-color:var(--accent); margin-bottom:20px; padding:16px 20px;">
+    <div style="font-size:0.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">Running Example</div>
+    <div style="display:flex; flex-wrap:wrap; gap:20px; align-items:center;">
+      <div><span style="color:var(--yellow); font-weight:600;">Query:</span> <code>"Who directed Toy Story?"</code></div>
+      <div><span style="color:var(--accent2); font-weight:600;">DB size:</span> ~9,125 movie nodes in Neo4j</div>
+      <div><span style="color:var(--green); font-weight:600;">k =</span> 6 results requested</div>
+    </div>
+  </div>
+
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
     <div class="card card-red">
       <h3 style="color:var(--red); margin-top:0">Brute Force (not what Neo4j uses)</h3>
-      <p>Compare query against every single vector. Perfectly accurate. Extremely slow for large datasets.</p>
+      <p>Compare <em>every</em> movie's plot embedding against your query vector. For "Who directed Toy Story?", that means scoring all <strong>9,125</strong> plot vectors one by one.</p>
       <div class="compare-bars" style="margin-top:16px;">
         <div class="bar-col">
           <div class="bar-rect" style="background:var(--red); height:120px;"></div>
-          <div class="bar-val" style="color:var(--red);">O(N)</div>
-          <div class="bar-lbl">Time</div>
+          <div class="bar-val" style="color:var(--red);">9,125 nodes</div>
+          <div class="bar-lbl">Comparisons</div>
         </div>
         <div class="bar-col">
           <div class="bar-rect" style="background:#4fc3f7; height:120px;"></div>
@@ -333,12 +342,12 @@
     </div>
     <div class="card card-green">
       <h3 style="color:var(--green); margin-top:0">HNSW (what Neo4j uses)</h3>
-      <p>Navigate a multi-layer graph to reach the approximate neighborhood. Fast. ~95-99% recall in practice.</p>
+      <p>Navigate toward the Pixar/animation region of the graph. For "Who directed Toy Story?", HNSW visits only <strong>~150 nodes</strong> — skipping 9,000+ unrelated films entirely.</p>
       <div class="compare-bars" style="margin-top:16px;">
         <div class="bar-col">
-          <div class="bar-rect" style="background:var(--green); height:28px;"></div>
-          <div class="bar-val" style="color:var(--green);">O(log N)</div>
-          <div class="bar-lbl">Time</div>
+          <div class="bar-rect" style="background:var(--green); height:20px;"></div>
+          <div class="bar-val" style="color:var(--green);">~150 nodes</div>
+          <div class="bar-lbl">Comparisons</div>
         </div>
         <div class="bar-col">
           <div class="bar-rect" style="background:#4fc3f7; height:114px;"></div>
@@ -348,7 +357,32 @@
       </div>
     </div>
   </div>
-  <p><strong>RAM usage:</strong> Neo4j keeps the HNSW index in memory (it's a graph of pointers), but NOT the raw vectors or document content. Only the vectors of nodes visited during traversal are accessed.</p>
+  <div class="card" style="margin-bottom:16px; padding:18px 22px;">
+    <div style="font-size:0.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:12px;">Why ~150 nodes?</div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px;">
+      <div style="background:var(--surface2); border-radius:8px; padding:12px; text-align:center;">
+        <div style="font-size:1.3rem; font-weight:700; color:var(--accent);">3</div>
+        <div style="font-size:0.78rem; color:var(--muted); margin-top:2px;">HNSW layers</div>
+        <div style="font-size:0.72rem; color:#8b949e; margin-top:4px;">floor(log(9125) / log(16))</div>
+      </div>
+      <div style="background:var(--surface2); border-radius:8px; padding:12px; text-align:center;">
+        <div style="font-size:1.3rem; font-weight:700; color:var(--yellow);">~40</div>
+        <div style="font-size:0.78rem; color:var(--muted); margin-top:2px;">Upper-layer nodes</div>
+        <div style="font-size:0.72rem; color:#8b949e; margin-top:4px;">Greedy walk on L2 + L1</div>
+      </div>
+      <div style="background:var(--surface2); border-radius:8px; padding:12px; text-align:center;">
+        <div style="font-size:1.3rem; font-weight:700; color:var(--green);">100</div>
+        <div style="font-size:0.78rem; color:var(--muted); margin-top:2px;">Layer 0 candidates</div>
+        <div style="font-size:0.72rem; color:#8b949e; margin-top:4px;">Beam search ef = 100</div>
+      </div>
+    </div>
+    <div style="background:var(--surface2); border-radius:6px; padding:10px 14px; font-size:0.85rem; color:#c9d1d9;">
+      Total: <strong style="color:var(--green);">~130–150 unique nodes</strong> touched out of 9,125.
+      Films like <em>Alien</em>, <em>Speed</em>, or <em>Titanic</em> are never loaded — their plot embeddings
+      point in a completely different direction in the 1536-dim space.
+    </div>
+  </div>
+  <p><strong>RAM usage:</strong> Neo4j keeps the HNSW index structure in memory (a graph of pointers), but NOT all raw vectors. Only the vectors of the <strong>~150 traversed nodes</strong> are accessed — the other 8,975 plot embeddings are never read from disk.</p>
 
   <hr class="divider">
 
@@ -356,113 +390,145 @@
   <!-- SECTION 3: HNSW STRUCTURE                      -->
   <!-- ═══════════════════════════════════════════════ -->
   <h2>3 · HNSW Structure — The Multi-Layer Graph</h2>
-  <p>Think of it as a <strong>multi-floor building</strong>. Higher floors are sparser and act as express highways. Every node lives on Layer 0; only some nodes are promoted to upper layers.</p>
+  <p>Think of it as a <strong>multi-floor building</strong>. Higher floors are sparser and act as express highways. Every node lives on Layer 0; only some nodes are promoted to upper layers. Here each node is a movie, and its position reflects how similar its plot embedding is to neighbouring movies.</p>
 
   <div class="card">
-    <div class="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:#7c6af744; border-color:var(--accent);"></div> Entry / promoted node</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#e3b34122; border-color:var(--yellow);"></div> Query vector</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#4fc3f722; border-color:var(--accent2);"></div> Visited during search</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#56d36422; border-color:var(--green);"></div> Result (top-k)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#f8514922; border-color:var(--red);"></div> Never visited (far)</div>
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; padding:10px 14px; background:var(--surface2); border-radius:8px; font-size:0.8rem;">
+      <span style="color:var(--muted); font-weight:600; margin-right:4px;">Abbreviations:</span>
+      <span><code>TT</code> = Titanic</span>
+      <span><code>SK</code> = Shrek</span>
+      <span><code>TS</code> = Toy Story</span>
+      <span><code>ABL</code> = A Bug's Life</span>
+      <span><code>FN</code> = Finding Nemo</span>
+      <span><code>TS2</code> = Toy Story 2</span>
+      <span><code>MI</code> = Monsters Inc</span>
+      <span><code>Cars</code> = Cars</span>
+      <span><code>UP</code> = Up</span>
+      <span><code>ALN</code> = Alien</span>
+      <span><code>SPD</code> = Speed</span>
     </div>
 
-    <svg id="hnsw-svg" viewBox="0 0 860 420">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#7c6af744; border-color:var(--accent);"></div> Entry / promoted node</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e3b34122; border-color:var(--yellow);"></div> Query: "Who directed Toy Story?"</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#4fc3f722; border-color:var(--accent2);"></div> Visited during search</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#56d36422; border-color:var(--green);"></div> Result (top-k returned)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f8514922; border-color:var(--red);"></div> Never visited (semantically far)</div>
+    </div>
+
+    <svg id="hnsw-svg" viewBox="0 0 860 430">
       <!-- Layer backgrounds -->
       <rect x="10" y="10"  width="840" height="110" rx="8" fill="#ffffff04" stroke="#30363d" stroke-width="1"/>
       <rect x="10" y="140" width="840" height="110" rx="8" fill="#ffffff04" stroke="#30363d" stroke-width="1"/>
-      <rect x="10" y="270" width="840" height="130" rx="8" fill="#ffffff06" stroke="#30363d" stroke-width="1"/>
+      <rect x="10" y="270" width="840" height="150" rx="8" fill="#ffffff06" stroke="#30363d" stroke-width="1"/>
 
       <!-- Layer labels -->
-      <text x="22" y="32"  class="layer-label">Layer 2  (sparse — express highway)</text>
-      <text x="22" y="162" class="layer-label">Layer 1  (medium density)</text>
-      <text x="22" y="292" class="layer-label">Layer 0  (all nodes — dense)</text>
+      <text x="22" y="32"  class="layer-label">Layer 2  (sparse — express highway · only 3 promoted nodes)</text>
+      <text x="22" y="162" class="layer-label">Layer 1  (medium density · 5 nodes)</text>
+      <text x="22" y="292" class="layer-label">Layer 0  (all ~9,125 movie nodes — dense · showing 11)</text>
 
       <!-- ── Layer 2 edges ── -->
       <line x1="150" y1="80" x2="430" y2="80" class="edge-default"/>
       <line x1="430" y1="80" x2="680" y2="80" class="edge-default"/>
-      <!-- Layer 2 nodes: A, E, H -->
+      <!-- Layer 2 nodes: TT, SK, TS -->
       <circle cx="150" cy="80" r="20" class="node-entry"/>
-      <text x="150" y="80" class="node-label">A</text>
+      <text x="150" y="80" class="node-label">TT</text>
       <circle cx="430" cy="80" r="20" class="node-entry"/>
-      <text x="430" y="80" class="node-label">E</text>
+      <text x="430" y="80" class="node-label">SK</text>
       <circle cx="680" cy="80" r="20" class="node-entry"/>
-      <text x="680" y="80" class="node-label">H</text>
+      <text x="680" y="80" class="node-label">TS</text>
 
       <!-- ── Layer 1 edges ── -->
       <line x1="150" y1="210" x2="260" y2="210" class="edge-default"/>
       <line x1="260" y1="210" x2="430" y2="210" class="edge-default"/>
       <line x1="430" y1="210" x2="560" y2="210" class="edge-default"/>
       <line x1="560" y1="210" x2="680" y2="210" class="edge-default"/>
-      <!-- Layer 1 nodes: A, C, E, G, H -->
+      <!-- Layer 1 nodes: TT, ABL, SK, FN, TS -->
       <circle cx="150" cy="210" r="20" class="node-entry"/>
-      <text x="150" y="210" class="node-label">A</text>
+      <text x="150" y="210" class="node-label">TT</text>
       <circle cx="260" cy="210" r="18" class="node-default"/>
-      <text x="260" y="210" class="node-label">C</text>
+      <text x="260" y="210" class="node-label">ABL</text>
       <circle cx="430" cy="210" r="20" class="node-entry"/>
-      <text x="430" y="210" class="node-label">E</text>
+      <text x="430" y="210" class="node-label">SK</text>
       <circle cx="560" cy="210" r="18" class="node-default"/>
-      <text x="560" y="210" class="node-label">G</text>
+      <text x="560" y="210" class="node-label">FN</text>
       <circle cx="680" cy="210" r="20" class="node-entry"/>
-      <text x="680" y="210" class="node-label">H</text>
+      <text x="680" y="210" class="node-label">TS</text>
 
       <!-- ── Layer 0 edges (dense) ── -->
-      <line x1="80"  y1="350" x2="150" y2="350" class="edge-default"/>
-      <line x1="150" y1="350" x2="220" y2="350" class="edge-default"/>
-      <line x1="220" y1="350" x2="260" y2="350" class="edge-default"/>
-      <line x1="260" y1="350" x2="340" y2="350" class="edge-default"/>
-      <line x1="340" y1="350" x2="430" y2="350" class="edge-default"/>
-      <line x1="430" y1="350" x2="500" y2="350" class="edge-default"/>
-      <line x1="500" y1="350" x2="560" y2="350" class="edge-default"/>
-      <line x1="560" y1="350" x2="620" y2="350" class="edge-default"/>
-      <line x1="620" y1="350" x2="680" y2="350" class="edge-default"/>
-      <line x1="680" y1="350" x2="780" y2="350" class="edge-default"/>
-      <!-- Cross edges -->
-      <line x1="150" y1="350" x2="340" y2="350" class="edge-default" stroke-dasharray="3 3"/>
-      <line x1="430" y1="350" x2="620" y2="350" class="edge-default" stroke-dasharray="3 3"/>
+      <line x1="80"  y1="360" x2="150" y2="360" class="edge-default"/>
+      <line x1="150" y1="360" x2="220" y2="360" class="edge-default"/>
+      <line x1="220" y1="360" x2="260" y2="360" class="edge-default"/>
+      <line x1="260" y1="360" x2="340" y2="360" class="edge-default"/>
+      <line x1="340" y1="360" x2="430" y2="360" class="edge-default"/>
+      <line x1="430" y1="360" x2="500" y2="360" class="edge-default"/>
+      <line x1="500" y1="360" x2="560" y2="360" class="edge-default"/>
+      <line x1="560" y1="360" x2="620" y2="360" class="edge-default"/>
+      <line x1="620" y1="360" x2="680" y2="360" class="edge-default"/>
+      <line x1="680" y1="360" x2="780" y2="360" class="edge-default"/>
+      <!-- Cross edges (long-range links in HNSW) -->
+      <line x1="150" y1="360" x2="340" y2="360" class="edge-default" stroke-dasharray="3 3"/>
+      <line x1="430" y1="360" x2="620" y2="360" class="edge-default" stroke-dasharray="3 3"/>
 
       <!-- Layer 0 nodes -->
-      <circle cx="80"  cy="350" r="16" class="node-far"/>
-      <text x="80"  cy="350" class="node-label" y="350">Z</text>
-      <circle cx="150" cy="350" r="18" class="node-entry"/>
-      <text x="150" y="350" class="node-label">A</text>
-      <circle cx="220" cy="350" r="16" class="node-default"/>
-      <text x="220" y="350" class="node-label">B</text>
-      <circle cx="260" cy="350" r="16" class="node-default"/>
-      <text x="260" y="350" class="node-label">C</text>
-      <circle cx="340" cy="350" r="16" class="node-default"/>
-      <text x="340" y="350" class="node-label">D</text>
-      <circle cx="430" cy="350" r="18" class="node-entry"/>
-      <text x="430" y="350" class="node-label">E</text>
-      <circle cx="500" cy="350" r="16" class="node-result"/>
-      <text x="500" y="350" class="node-label">F</text>
-      <circle cx="560" cy="350" r="16" class="node-visited"/>
-      <text x="560" y="350" class="node-label">G</text>
-      <circle cx="620" cy="350" r="16" class="node-result"/>
-      <text x="620" y="350" class="node-label">H★</text>
-      <circle cx="680" cy="350" r="18" class="node-entry"/>
-      <text x="680" y="350" class="node-label">I</text>
-      <circle cx="780" cy="350" r="16" class="node-far"/>
-      <text x="780" y="350" class="node-label">Y</text>
+      <!-- ALN = Alien (far — horror/sci-fi, nothing like Pixar animation) -->
+      <circle cx="80"  cy="360" r="16" class="node-far"/>
+      <text x="80"  y="360" class="node-label">ALN</text>
+      <!-- TT = Titanic (entry, but drama/romance — not close to Pixar) -->
+      <circle cx="150" cy="360" r="18" class="node-entry"/>
+      <text x="150" y="360" class="node-label">TT</text>
+      <!-- TS2 = Toy Story 2 (very close to query — same franchise) -->
+      <circle cx="220" cy="360" r="16" class="node-result"/>
+      <text x="220" y="360" class="node-label">TS2</text>
+      <!-- ABL = A Bug's Life (Pixar, Lasseter — very similar) -->
+      <circle cx="260" cy="360" r="16" class="node-result"/>
+      <text x="260" y="360" class="node-label">ABL</text>
+      <!-- MI = Monsters Inc (Pixar, overlapping themes) -->
+      <circle cx="340" cy="360" r="16" class="node-default"/>
+      <text x="340" y="360" class="node-label">MI</text>
+      <!-- SK = Shrek (animated, entry — visited but not top result) -->
+      <circle cx="430" cy="360" r="18" class="node-entry"/>
+      <text x="430" y="360" class="node-label">SK</text>
+      <!-- Cars = Cars (Pixar — visited) -->
+      <circle cx="500" cy="360" r="16" class="node-result"/>
+      <text x="500" y="360" class="node-label">Cars</text>
+      <!-- FN = Finding Nemo (Pixar — visited) -->
+      <circle cx="560" cy="360" r="16" class="node-visited"/>
+      <text x="560" y="360" class="node-label">FN</text>
+      <!-- TS = Toy Story (exact match — top result ★) -->
+      <circle cx="620" cy="360" r="18" class="node-result"/>
+      <text x="620" y="355" class="node-label">TS★</text>
+      <!-- UP = Up (Pixar — entry, visited) -->
+      <circle cx="680" cy="360" r="18" class="node-entry"/>
+      <text x="680" y="360" class="node-label">UP</text>
+      <!-- SPD = Speed (action — nothing to do with animated Pixar) -->
+      <circle cx="780" cy="360" r="16" class="node-far"/>
+      <text x="780" y="360" class="node-label">SPD</text>
 
-      <!-- Query node (hovering) -->
-      <circle cx="580" cy="340" r="18" class="node-query"/>
-      <text x="580" y="340" class="node-label" fill="#e3b341">Q</text>
-      <text x="580" y="322" fill="#e3b341" font-size="10" font-family="monospace" text-anchor="middle">query</text>
+      <!-- Query node (hovering near TS cluster) -->
+      <circle cx="600" cy="344" r="18" class="node-query"/>
+      <text x="600" y="344" class="node-label" fill="#e3b341">Q</text>
+      <text x="600" y="326" fill="#e3b341" font-size="9" font-family="monospace" text-anchor="middle">"Toy Story dir?"</text>
 
       <!-- Vertical connections (same node across layers) -->
       <line x1="150" y1="100" x2="150" y2="190" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
       <line x1="430" y1="100" x2="430" y2="190" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
       <line x1="680" y1="100" x2="680" y2="190" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
-      <line x1="150" y1="230" x2="150" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
-      <line x1="260" y1="230" x2="260" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
-      <line x1="430" y1="230" x2="430" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
-      <line x1="560" y1="230" x2="560" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
-      <line x1="680" y1="230" x2="680" y2="330" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="150" y1="230" x2="150" y2="340" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="260" y1="230" x2="260" y2="340" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="430" y1="230" x2="430" y2="340" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="560" y1="230" x2="560" y2="340" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="680" y1="230" x2="680" y2="340" stroke="#7c6af744" stroke-width="1" stroke-dasharray="4 3"/>
 
       <!-- "Never visited" labels -->
-      <text x="80"  y="376" fill="#f85149" font-size="9" font-family="monospace" text-anchor="middle">never visited</text>
-      <text x="780" y="376" fill="#f85149" font-size="9" font-family="monospace" text-anchor="middle">never visited</text>
+      <text x="80"  y="387" fill="#f85149" font-size="9" font-family="monospace" text-anchor="middle">never visited</text>
+      <text x="780" y="387" fill="#f85149" font-size="9" font-family="monospace" text-anchor="middle">never visited</text>
+
+      <!-- Similarity scores for result nodes -->
+      <text x="220" y="384" fill="#56d364" font-size="8" font-family="monospace" text-anchor="middle">sim=0.95</text>
+      <text x="260" y="384" fill="#56d364" font-size="8" font-family="monospace" text-anchor="middle">sim=0.91</text>
+      <text x="500" y="384" fill="#56d364" font-size="8" font-family="monospace" text-anchor="middle">sim=0.82</text>
+      <text x="620" y="387" fill="#56d364" font-size="8" font-family="monospace" text-anchor="middle">sim=0.98 ★</text>
     </svg>
   </div>
 
@@ -472,26 +538,26 @@
   <!-- SECTION 4: STEP-BY-STEP SEARCH ANIMATION      -->
   <!-- ═══════════════════════════════════════════════ -->
   <h2>4 · Step-by-Step: How the Search Walks</h2>
-  <p>Click through each step to see how HNSW navigates to find your top results.</p>
+  <p>Click through each step to see how HNSW navigates from a random entry point all the way to <strong>Toy Story</strong> and its Pixar neighbours — for the query <code>"Who directed Toy Story?"</code></p>
 
   <div class="card card-accent">
     <div class="steps-nav" id="stepsNav">
-      <button class="step-btn active" onclick="setStep(0)">Step 1</button>
-      <button class="step-btn" onclick="setStep(1)">Step 2</button>
-      <button class="step-btn" onclick="setStep(2)">Step 3</button>
-      <button class="step-btn" onclick="setStep(3)">Step 4</button>
-      <button class="step-btn" onclick="setStep(4)">Step 5</button>
+      <button class="step-btn active" onclick="setStep(0)">Step 1 — Enter</button>
+      <button class="step-btn" onclick="setStep(1)">Step 2 — L2 Walk</button>
+      <button class="step-btn" onclick="setStep(2)">Step 3 — Drop to L1</button>
+      <button class="step-btn" onclick="setStep(3)">Step 4 — Beam Search L0</button>
+      <button class="step-btn" onclick="setStep(4)">Step 5 — Return Top-6</button>
     </div>
     <div class="step-desc" id="stepDesc"></div>
 
-    <svg id="walk-svg" viewBox="0 0 860 380" style="width:100%;height:auto;">
-      <!-- Same 3-layer structure, simplified for the walk -->
+    <svg id="walk-svg" viewBox="0 0 860 400" style="width:100%;height:auto;">
+      <!-- Layer backgrounds -->
       <rect x="10" y="10"  width="840" height="100" rx="8" fill="#ffffff03" stroke="#30363d"/>
       <rect x="10" y="130" width="840" height="100" rx="8" fill="#ffffff03" stroke="#30363d"/>
-      <rect x="10" y="250" width="840" height="110" rx="8" fill="#ffffff05" stroke="#30363d"/>
-      <text x="22" y="30"  class="layer-label">Layer 2</text>
-      <text x="22" y="150" class="layer-label">Layer 1</text>
-      <text x="22" y="270" class="layer-label">Layer 0</text>
+      <rect x="10" y="250" width="840" height="130" rx="8" fill="#ffffff05" stroke="#30363d"/>
+      <text x="22" y="30"  class="layer-label">Layer 2  (TT, SK, TS promoted)</text>
+      <text x="22" y="150" class="layer-label">Layer 1  (TT, ABL, SK, FN, TS)</text>
+      <text x="22" y="270" class="layer-label">Layer 0  (all 9,125 movies — subset shown)</text>
 
       <!-- L2 edges -->
       <line x1="150" y1="70" x2="430" y2="70" class="edge-default"/>
@@ -502,39 +568,44 @@
       <line x1="430" y1="195" x2="560" y2="195" class="edge-default"/>
       <line x1="560" y1="195" x2="680" y2="195" class="edge-default"/>
       <!-- L0 edges -->
-      <line x1="150" y1="320" x2="260" y2="320" class="edge-default"/>
-      <line x1="260" y1="320" x2="340" y2="320" class="edge-default"/>
-      <line x1="340" y1="320" x2="430" y2="320" class="edge-default"/>
-      <line x1="430" y1="320" x2="500" y2="320" class="edge-default"/>
-      <line x1="500" y1="320" x2="560" y2="320" class="edge-default"/>
-      <line x1="560" y1="320" x2="620" y2="320" class="edge-default"/>
-      <line x1="620" y1="320" x2="680" y2="320" class="edge-default"/>
+      <line x1="150" y1="335" x2="220" y2="335" class="edge-default"/>
+      <line x1="220" y1="335" x2="260" y2="335" class="edge-default"/>
+      <line x1="260" y1="335" x2="340" y2="335" class="edge-default"/>
+      <line x1="340" y1="335" x2="430" y2="335" class="edge-default"/>
+      <line x1="430" y1="335" x2="500" y2="335" class="edge-default"/>
+      <line x1="500" y1="335" x2="560" y2="335" class="edge-default"/>
+      <line x1="560" y1="335" x2="620" y2="335" class="edge-default"/>
+      <line x1="620" y1="335" x2="680" y2="335" class="edge-default"/>
 
-      <!-- Static nodes L2 -->
-      <circle cx="150" cy="70" r="18" class="node-entry" id="w-l2-a"/><text x="150" y="70" class="node-label">A</text>
-      <circle cx="430" cy="70" r="18" class="node-default" id="w-l2-e"/><text x="430" y="70" class="node-label">E</text>
-      <circle cx="680" cy="70" r="18" class="node-default" id="w-l2-h"/><text x="680" y="70" class="node-label">H</text>
-      <!-- Static nodes L1 -->
-      <circle cx="150" cy="195" r="16" class="node-default" id="w-l1-a"/><text x="150" y="195" class="node-label">A</text>
-      <circle cx="260" cy="195" r="16" class="node-default" id="w-l1-c"/><text x="260" y="195" class="node-label">C</text>
-      <circle cx="430" cy="195" r="16" class="node-default" id="w-l1-e"/><text x="430" y="195" class="node-label">E</text>
-      <circle cx="560" cy="195" r="16" class="node-default" id="w-l1-g"/><text x="560" y="195" class="node-label">G</text>
-      <circle cx="680" cy="195" r="16" class="node-default" id="w-l1-h"/><text x="680" y="195" class="node-label">H</text>
-      <!-- Static nodes L0 -->
-      <circle cx="150" cy="320" r="15" class="node-default" id="w-l0-a"/><text x="150" y="320" class="node-label">A</text>
-      <circle cx="260" cy="320" r="15" class="node-default" id="w-l0-c"/><text x="260" y="320" class="node-label">C</text>
-      <circle cx="340" cy="320" r="15" class="node-default" id="w-l0-d"/><text x="340" y="320" class="node-label">D</text>
-      <circle cx="430" cy="320" r="15" class="node-default" id="w-l0-e"/><text x="430" y="320" class="node-label">E</text>
-      <circle cx="500" cy="320" r="15" class="node-default" id="w-l0-f"/><text x="500" y="320" class="node-label">F</text>
-      <circle cx="560" cy="320" r="15" class="node-default" id="w-l0-g"/><text x="560" y="320" class="node-label">G</text>
-      <circle cx="620" cy="320" r="15" class="node-default" id="w-l0-h"/><text x="620" y="320" class="node-label">H</text>
-      <circle cx="680" cy="320" r="15" class="node-default" id="w-l0-i"/><text x="680" y="320" class="node-label">I</text>
+      <!-- Static nodes L2: TT(entry), SK, TS -->
+      <circle cx="150" cy="70" r="18" class="node-entry" id="w-l2-a"/><text x="150" y="70" class="node-label">TT</text>
+      <circle cx="430" cy="70" r="18" class="node-default" id="w-l2-e"/><text x="430" y="70" class="node-label">SK</text>
+      <circle cx="680" cy="70" r="18" class="node-default" id="w-l2-h"/><text x="680" y="70" class="node-label">TS</text>
 
-      <!-- Query node -->
-      <circle cx="590" cy="312" r="16" class="node-query" id="w-query"/>
-      <text x="590" y="312" class="node-label" fill="#e3b341">Q</text>
+      <!-- Static nodes L1: TT, ABL, SK, FN, TS -->
+      <circle cx="150" cy="195" r="16" class="node-default" id="w-l1-a"/><text x="150" y="195" class="node-label">TT</text>
+      <circle cx="260" cy="195" r="16" class="node-default" id="w-l1-c"/><text x="260" y="195" class="node-label">ABL</text>
+      <circle cx="430" cy="195" r="16" class="node-default" id="w-l1-e"/><text x="430" y="195" class="node-label">SK</text>
+      <circle cx="560" cy="195" r="16" class="node-default" id="w-l1-g"/><text x="560" y="195" class="node-label">FN</text>
+      <circle cx="680" cy="195" r="16" class="node-default" id="w-l1-h"/><text x="680" y="195" class="node-label">TS</text>
 
-      <!-- Traversal path arrows (hidden by default, shown per step) -->
+      <!-- Static nodes L0: TT, TS2, ABL, MI, SK, Cars, FN, TS★, UP -->
+      <circle cx="150" cy="335" r="15" class="node-default" id="w-l0-a"/><text x="150" y="335" class="node-label">TT</text>
+      <circle cx="220" cy="335" r="15" class="node-default" id="w-l0-c"/><text x="220" y="335" class="node-label">TS2</text>
+      <circle cx="340" cy="335" r="15" class="node-default" id="w-l0-d"/><text x="340" y="335" class="node-label">ABL</text>
+      <circle cx="430" cy="335" r="15" class="node-default" id="w-l0-e"/><text x="430" y="335" class="node-label">SK</text>
+      <circle cx="500" cy="335" r="15" class="node-default" id="w-l0-f"/><text x="500" y="335" class="node-label">Cars</text>
+      <circle cx="560" cy="335" r="15" class="node-default" id="w-l0-g"/><text x="560" y="335" class="node-label">FN</text>
+      <circle cx="620" cy="335" r="15" class="node-default" id="w-l0-h"/><text x="620" y="330" class="node-label">TS★</text>
+      <circle cx="680" cy="335" r="15" class="node-default" id="w-l0-i"/><text x="680" y="335" class="node-label">UP</text>
+      <!-- MI tucked between ABL and SK for beam search visibility -->
+      <circle cx="260" cy="335" r="15" class="node-default" id="w-l0-mi"/><text x="260" y="335" class="node-label">MI</text>
+
+      <!-- Query node near TS★ -->
+      <circle cx="600" cy="322" r="16" class="node-query" id="w-query"/>
+      <text x="600" y="322" class="node-label" fill="#e3b341">Q</text>
+
+      <!-- Traversal path arrows -->
       <defs>
         <marker id="tarrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
           <path d="M0,0 L0,6 L8,3 z" fill="#7c6af7"/>
@@ -543,7 +614,6 @@
           <path d="M0,0 L0,6 L8,3 z" fill="#4fc3f7"/>
         </marker>
       </defs>
-      <!-- Step arrows, controlled by JS -->
       <g id="walk-arrows"></g>
     </svg>
   </div>
@@ -761,42 +831,38 @@ embedding_model = <span class="hl-func">OpenAIEmbeddings</span>(model=<span clas
 
 <script>
 // ── Step-by-step walk ──
+// Query: "Who directed Toy Story?"
+// Node key → movie:  l2-a=TT(Titanic)  l2-e=SK(Shrek)  l2-h=TS(Toy Story)
+//                    l1-a=TT  l1-c=ABL(A Bug's Life)  l1-e=SK  l1-g=FN(Finding Nemo)  l1-h=TS
+//                    l0-a=TT  l0-c=TS2(Toy Story 2)  l0-d=ABL  l0-mi=MI(Monsters Inc)
+//                    l0-e=SK  l0-f=Cars  l0-g=FN  l0-h=TS★  l0-i=UP(Up)
 const steps = [
   {
-    desc: "<strong>Step 1 — Enter at Layer 2 (top).</strong> Search begins at a fixed entry point (node A) on the sparsest layer. This node was chosen at index build time.",
-    highlight: { l2: ['a'], l1: [], l0: [], path: [] }
+    desc: "<strong>Step 1 — Enter at Layer 2 at Titanic (TT).</strong> Neo4j picks a fixed entry node at the top (sparsest) layer. <em>Titanic</em> is just the arbitrary start — it has nothing to do with the query yet. From here we navigate toward the Pixar cluster.",
+    highlight: { l2: ['a'], l1: [], l0: [], extra: [], path: [] }
   },
   {
-    desc: "<strong>Step 2 — Greedy walk on Layer 2.</strong> From A, check neighbors (E, H). H is closer to query Q than A, so we move to H. No neighbor is closer than H — local minimum found.",
-    highlight: { l2: ['a','e','h'], l1: [], l0: [], path: [['l2-a','l2-e'],['l2-e','l2-h']] }
+    desc: "<strong>Step 2 — Greedy walk on Layer 2: TT → SK → TS.</strong> From Titanic, check both neighbors. Shrek (SK) is an animated film, so its embedding is closer to the Pixar-flavored query than Titanic (drama/romance). Move to SK. Then check TS (Toy Story) — even closer. Move again. No neighbor beats TS. Local minimum found on Layer 2.",
+    highlight: { l2: ['a','e','h'], l1: [], l0: [], extra: [], path: [['l2-a','l2-e'],['l2-e','l2-h']] }
   },
   {
-    desc: "<strong>Step 3 — Drop to Layer 1, start at H.</strong> Find node H on Layer 1. Repeat greedy walk. Neighbors G and E are checked — G is closest to Q, move there.",
-    highlight: { l2: ['h'], l1: ['h','g'], l0: [], path: [['l1-h','l1-g']] }
+    desc: "<strong>Step 3 — Drop to Layer 1, land on TS.</strong> Find Toy Story on Layer 1. Check its neighbors: ABL (A Bug's Life, Pixar) and FN (Finding Nemo, Pixar). ABL's plot — animated, same director (Lasseter) — scores closer to the query. Move to ABL. FN is also checked but ABL wins. Local min on Layer 1 = ABL.",
+    highlight: { l2: ['h'], l1: ['h','c','g'], l0: [], extra: [], path: [['l1-h','l1-c']] }
   },
   {
-    desc: "<strong>Step 4 — Drop to Layer 0, start at G.</strong> Now on the densest layer. Switch to <em>beam search</em>: maintain a candidate list of size ef=100. Explore neighbors F, H, E around G.",
-    highlight: { l2: [], l1: ['g'], l0: ['g','f','h','e'], path: [['l0-g','l0-f'],['l0-g','l0-h'],['l0-g','l0-e']] }
+    desc: "<strong>Step 4 — Drop to Layer 0, beam search from ABL.</strong> Now on the densest layer. Switch to beam search with ef=100 candidates. Expand ABL's neighbors: TS★ (sim=0.98!), TS2 (sim=0.95), MI (Monsters Inc, Pixar), Cars, FN. Each of these gets added to the candidate queue and their own neighbors are explored.",
+    highlight: { l2: [], l1: ['c'], l0: ['d','h','c','mi','f','g'], extra: [], path: [['l0-d','l0-h'],['l0-d','l0-c'],['l0-d','l0-mi'],['l0-d','l0-f']] }
   },
   {
-    desc: "<strong>Step 5 — Return top-k.</strong> Beam search exhausts ef candidates. Results are sorted by cosine similarity to Q. Top-6 are returned (here: H, F, G highlighted). Nodes A, Z, Y were never visited.",
-    highlight: { l2: [], l1: [], l0: ['g','f','h'], path: [] }
+    desc: "<strong>Step 5 — Return top-6 results.</strong> Beam search exhausts the ef=100 candidate queue. Sort all visited nodes by cosine similarity. Top 6: <span style='color:#56d364'>TS★ (0.98)</span>, <span style='color:#56d364'>TS2 (0.95)</span>, <span style='color:#56d364'>ABL (0.91)</span>, <span style='color:#56d364'>MI (0.85)</span>, <span style='color:#56d364'>Cars (0.82)</span>, <span style='color:#56d364'>FN (0.78)</span>. Films like Titanic, Alien, Speed — never visited, never scored.",
+    highlight: { l2: [], l1: [], l0: ['h','c','d','mi','f','g'], extra: [], path: [] }
   }
 ];
-
-const nodeClasses = {
-  default: 'node-default',
-  entry:   'node-entry',
-  visited: 'node-visited',
-  result:  'node-result',
-  query:   'node-query',
-  far:     'node-far'
-};
 
 const nodeMap = {
   'l2-a': 'w-l2-a', 'l2-e': 'w-l2-e', 'l2-h': 'w-l2-h',
   'l1-a': 'w-l1-a', 'l1-c': 'w-l1-c', 'l1-e': 'w-l1-e', 'l1-g': 'w-l1-g', 'l1-h': 'w-l1-h',
-  'l0-a': 'w-l0-a', 'l0-c': 'w-l0-c', 'l0-d': 'w-l0-d', 'l0-e': 'w-l0-e',
+  'l0-a': 'w-l0-a', 'l0-c': 'w-l0-c', 'l0-d': 'w-l0-d', 'l0-mi': 'w-l0-mi', 'l0-e': 'w-l0-e',
   'l0-f': 'w-l0-f', 'l0-g': 'w-l0-g', 'l0-h': 'w-l0-h', 'l0-i': 'w-l0-i'
 };
 
@@ -804,16 +870,19 @@ const nodeMap = {
 const pos = {
   'l2-a': [150,70], 'l2-e': [430,70], 'l2-h': [680,70],
   'l1-a': [150,195], 'l1-c': [260,195], 'l1-e': [430,195], 'l1-g': [560,195], 'l1-h': [680,195],
-  'l0-a': [150,320], 'l0-c': [260,320], 'l0-d': [340,320], 'l0-e': [430,320],
-  'l0-f': [500,320], 'l0-g': [560,320], 'l0-h': [620,320], 'l0-i': [680,320]
+  'l0-a': [150,335], 'l0-c': [220,335], 'l0-d': [340,335], 'l0-mi': [260,335], 'l0-e': [430,335],
+  'l0-f': [500,335], 'l0-g': [560,335], 'l0-h': [620,335], 'l0-i': [680,335]
 };
+
+// Result nodes for step 5
+const resultKeys = new Set(['l0-h','l0-c','l0-d','l0-mi','l0-f','l0-g']);
 
 function resetNodes() {
   Object.values(nodeMap).forEach(id => {
     const el = document.getElementById(id);
     if (el) el.setAttribute('class', 'node-default');
   });
-  // Restore promoted nodes
+  // Restore promoted entry nodes (TT on L2 and L1)
   ['w-l2-a','w-l1-a'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.setAttribute('class', 'node-entry');
@@ -826,7 +895,6 @@ function setStep(idx) {
   const step = steps[idx];
   document.getElementById('stepDesc').innerHTML = step.desc;
 
-  // Update button states
   document.querySelectorAll('.step-btn').forEach((b,i) => {
     b.classList.toggle('active', i === idx);
   });
@@ -836,10 +904,15 @@ function setStep(idx) {
   const arrowsG = document.getElementById('walk-arrows');
 
   // Highlight visited nodes
-  [...h.l2.map(n=>'l2-'+n), ...h.l1.map(n=>'l1-'+n), ...h.l0.map(n=>'l0-'+n)].forEach(key => {
+  const allKeys = [
+    ...h.l2.map(n=>'l2-'+n),
+    ...h.l1.map(n=>'l1-'+n),
+    ...h.l0.map(n=>'l0-'+n)
+  ];
+  allKeys.forEach(key => {
     const el = document.getElementById(nodeMap[key]);
     if (el) {
-      if (idx === 4 && (key==='l0-f'||key==='l0-h'||key==='l0-g')) {
+      if (idx === 4 && resultKeys.has(key)) {
         el.setAttribute('class','node-result');
       } else {
         el.setAttribute('class','node-visited');
