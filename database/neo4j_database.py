@@ -25,7 +25,10 @@ class Neo4jDatabase:
 
     def get_vector_index(self, graph: Neo4jGraph) -> Neo4jVector:
         try:
-            embedding_model = OpenAIEmbeddings(model="text-embedding-ada-002")
+            # Option C: set EMBEDDING_MODEL=text-embedding-3-large in .env to upgrade.
+            # Requires re-embedding all plots and recreating the Neo4j vector index.
+            model_name = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
+            embedding_model = OpenAIEmbeddings(model=model_name)
             return Neo4jVector.from_existing_index(
                 embedding=embedding_model,
                 graph=graph,

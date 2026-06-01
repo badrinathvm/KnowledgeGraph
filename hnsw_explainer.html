@@ -824,6 +824,121 @@ embedding_model = <span class="hl-func">OpenAIEmbeddings</span>(model=<span clas
     </table>
   </div>
 
+  <hr class="divider">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SECTION 10: REAL RESULTS COMPARISON            -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <h2>10 · Real Results — Query: "romantic movies"</h2>
+  <p>All three strategies were tested live against the Neo4j movie database. Here's what each returned.</p>
+
+  <!-- Query banner -->
+  <div class="card" style="background:#7c6af711; border-color:var(--accent); padding:14px 20px; margin-bottom:20px;">
+    <div style="font-size:0.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px;">Live Query</div>
+    <code style="font-size:0.95rem;">"romantic movies"</code>
+    <span style="color:var(--muted); font-size:0.82rem; margin-left:16px;">k = 6 · Neo4jVector + text-embedding-ada-002</span>
+  </div>
+
+  <!-- Side-by-side results -->
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:24px;">
+
+    <!-- Default -->
+    <div class="card" style="border-top:3px solid var(--accent2); padding:16px;">
+      <div style="font-size:0.75rem; color:var(--accent2); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:10px;">Default · similarity_search(k=6)</div>
+      <ol style="padding-left:18px; margin:0; font-size:0.82rem; color:#c9d1d9; line-height:2;">
+        <li>French Kiss <span style="color:var(--muted);">6.5</span></li>
+        <li>Bed of Roses <span style="color:var(--muted);">6.0</span></li>
+        <li>Bridges of Madison County <span style="color:var(--muted);">7.5</span></li>
+        <li>Nina Takes a Lover <span style="color:var(--muted);">5.7</span></li>
+        <li>Love Affair <span style="color:var(--muted);">5.9</span></li>
+        <li>First Knight <span style="color:var(--muted);">5.9</span></li>
+      </ol>
+    </div>
+
+    <!-- MMR -->
+    <div class="card" style="border-top:3px solid var(--yellow); padding:16px;">
+      <div style="font-size:0.75rem; color:var(--yellow); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:10px;">MMR · fetch_k=20, k=6</div>
+      <ol style="padding-left:18px; margin:0; font-size:0.82rem; color:#c9d1d9; line-height:2;">
+        <li>French Kiss <span style="color:var(--muted);">6.5</span></li>
+        <li>Bridges of Madison County <span style="color:var(--muted);">7.5</span></li>
+      </ol>
+      <div style="margin-top:12px; background:#e3b34122; border:1px solid var(--yellow); border-radius:6px; padding:8px 10px; font-size:0.78rem; color:var(--yellow);">
+        ⚠ Over-pruned — returned only 2 results. Results were already diverse so MMR aggressively discarded 4.
+      </div>
+    </div>
+
+    <!-- Rerank -->
+    <div class="card" style="border-top:3px solid var(--green); padding:16px;">
+      <div style="font-size:0.75rem; color:var(--green); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:10px;">Rerank · cross-encoder top 6 of 20</div>
+      <ol style="padding-left:18px; margin:0; font-size:0.82rem; color:#c9d1d9; line-height:2;">
+        <li>Bridges of Madison County <span style="color:var(--green); font-weight:600;">7.5 ⬆</span></li>
+        <li>Bed of Roses <span style="color:var(--muted);">6.0</span></li>
+        <li>Jeffrey <span style="color:var(--accent2);">6.7 🆕</span></li>
+        <li>Only You <span style="color:var(--accent2);">6.5 🆕</span></li>
+        <li>French Kiss <span style="color:var(--muted);">6.5</span></li>
+        <li>Mr. Wrong <span style="color:var(--red);">3.7 ⚠</span></li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- Analysis cards -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px;">
+    <div class="card card-green" style="padding:16px;">
+      <h3 style="margin-top:0; color:var(--green); font-size:0.95rem;">What Rerank did well</h3>
+      <ul style="padding-left:18px; margin:0; font-size:0.83rem; color:#c9d1d9; line-height:1.9;">
+        <li>Promoted <em>Bridges of Madison County</em> (7.5) to <strong>#1</strong> — highest quality film in the set</li>
+        <li>Surfaced <em>Jeffrey</em> and <em>Only You</em> not in default results — cross-encoder found them more relevant</li>
+        <li>Cross-encoder reads full query + plot together, not just vector closeness</li>
+      </ul>
+    </div>
+    <div class="card card-red" style="padding:16px;">
+      <h3 style="margin-top:0; color:var(--red); font-size:0.95rem;">Watch-outs</h3>
+      <ul style="padding-left:18px; margin:0; font-size:0.83rem; color:#c9d1d9; line-height:1.9;">
+        <li><em>Mr. Wrong</em> (3.7 IMDb) snuck in — cross-encoder scores plot relevance, not film quality</li>
+        <li>MMR is the wrong tool for broad genre queries where results are already diverse</li>
+        <li>MMR works best when top results are near-duplicates (same franchise, same director)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Verdict table -->
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Strategy</th>
+          <th>Results</th>
+          <th>Ordering</th>
+          <th>Best for</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong style="color:var(--accent2);">Default</strong></td>
+          <td>6 ✅</td>
+          <td>Arbitrary (embedding proximity)</td>
+          <td>Broad queries, baseline</td>
+          <td><span class="tag tag-approx">⭐⭐ Good</span></td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--yellow);">MMR</strong></td>
+          <td>2 ⚠️</td>
+          <td>Diverse but over-pruned</td>
+          <td>Near-duplicate results (same franchise/director)</td>
+          <td><span class="tag tag-exact">⭐ Wrong tool here</span></td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--green);">Rerank</strong></td>
+          <td>6 ✅</td>
+          <td>Best-first (cross-encoder scored)</td>
+          <td>Precision queries, quality ordering</td>
+          <td><span class="tag tag-fast">⭐⭐⭐ Best</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
   <p style="color:var(--muted); font-size:0.8rem; margin-top:40px; text-align:center;">
     Generated for KnowledgeGraph · Neo4jVector + text-embedding-ada-002 + LangGraph
   </p>

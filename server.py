@@ -72,11 +72,15 @@ async def query_graph(req: QueryRequest):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="question must not be empty")
 
-    # 1. Semantic search to find matching movie titles
-    docs = await asyncio.to_thread(plot_vector.similarity_search, req.question, 6)
-    titles = [doc.metadata.get("title") for doc in docs if doc.metadata.get("title")]
+    # Run LangGraph pipeline (retrieve → [rerank] → generate) with chosen strategy
+    llm = OpenAILLM().get_llm()
+    response = await asyncio.to_thread(
+        GraphBuilder(llm).run, req.question, req.strategy
+    )
 
-    # 2. Resolve titles → Neo4j elementIds
+    # Resolve titles from pipeline context → Neo4j elementIds for graph highlighting
+    docs = response.get("context", [])
+    titles = [doc.metadata.get("title") for doc in docs if doc.metadata.get("title")]
     highlighted_ids: list[str] = []
     for title in titles:
         rows = await asyncio.to_thread(
@@ -85,10 +89,6 @@ async def query_graph(req: QueryRequest):
             params={"title": title},
         )
         highlighted_ids.extend(r["id"] for r in rows)
-
-    # 3. Run LangGraph retrieve → generate for the LLM answer
-    llm = OpenAILLM().get_llm()
-    response = await asyncio.to_thread(GraphBuilder(llm).run, req.question)
 
     return QueryResponse(
         answer=response["result"],

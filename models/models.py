@@ -22,6 +22,7 @@ class GraphResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str
+    strategy: str = "default"  # "default" | "mmr" | "rerank"
 
 
 class QueryResponse(BaseModel):
